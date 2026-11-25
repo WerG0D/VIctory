@@ -1108,6 +1108,39 @@ mod tests {
         assert!(!slot.join("v1").exists(), "and goes once it is let go");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn a_held_old_version_and_a_broken_newer_manifest_preserve_the_readable_save() {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let slot = container_dir(root, "Slot");
+        assert_eq!(update(root, "one", &[("a", Some("1"))]), S_OK);
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1 | 2)
+            .open(slot.join("v1").join(MANIFEST))
+            .unwrap();
+        assert_eq!(update(root, "two", &[("a", Some("2"))]), S_OK);
+        let broken = slot.join("v3");
+        std::fs::create_dir(&broken).unwrap();
+        std::fs::write(broken.join(MANIFEST), [0xff]).unwrap();
+
+        assert_eq!(
+            state(root),
+            Some(("two".into(), vec![("a".into(), "2".into())]))
+        );
+        assert_eq!(std::fs::read(broken.join(MANIFEST)).unwrap(), [0xff]);
+        assert_eq!(update(root, "four", &[("a", Some("4"))]), S_OK);
+        assert!(slot.join("v4").join(MANIFEST).is_file());
+        let expected = Some(("four".into(), vec![("a".into(), "4".into())]));
+        assert_eq!(state(root), expected);
+        assert!(slot.join("v1").is_dir());
+        drop(held);
+        assert_eq!(state(root), expected);
+        assert!(!slot.join("v1").exists());
+    }
+
     /// Run by the crash test in a child process; does nothing otherwise.
     #[test]
     fn crash_child() {
